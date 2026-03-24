@@ -24,21 +24,29 @@ Sebelum mulai coding, kita perlu daftarkan aplikasi di Google Cloud Console.
 ## 1.1 Buat Project & Aktifkan API
 
 1. Buka [Google Cloud Console](https://console.cloud.google.com/)
-2. Buat project baru, misal `monorepo-classroom`
+2. Buat project baru, misal `monorepo`
 3. Di menu **APIs & Services → Library**, cari dan aktifkan:
    - **Google Classroom API**
-   - **Google OAuth2 API** (biasanya sudah aktif)
 
 ## 1.2 Buat OAuth2 Credentials
 
 1. Buka **APIs & Services → Credentials**
-2. Klik **Create Credentials → OAuth 2.0 Client IDs**
-3. Application type: **Web application**
-4. Tambahkan ke **Authorized redirect URIs**:
+2. sebelum buat Credential, Klik **Configure concent screen**:
+   - di halaman *Oauth Overview*, klik **Get Started**
+   - **App name** `monorepo`
+   - **User Support Email**: email kamu yang terdaftar di Classroom
+   - **Audience** `external`
+   - **Contact Information**: email yang sama
+   - **Finish**: checklist agree -> klik **Continue** -> klik **Create**  
+3. di halaman *Oauth Overview*: klik **Create OAuth client**
+   - Application type: **Web application**
+   - **Name**: `web monorepo`
+   - Tambahkan ke **Authorized redirect URIs**:
    ```
    http://localhost:3000/auth/callback
    ```
-5. Simpan **Client ID** dan **Client Secret**
+4. klik **Download JSON** berisi Client ID & secret. 
+5. Rename file jadi **credentials.json**, masukkan ke root proyek.
 
 ## 1.3 Tambahkan ke `.env` Backend
 
@@ -52,6 +60,7 @@ GOOGLE_CLIENT_SECRET=your_client_secret_here
 GOOGLE_REDIRECT_URI=http://localhost:3000/auth/callback
 SESSION_SECRET=random_string_rahasia_panjang
 ```
+Session secret key bisa buat pakai [secretkeygen](https://secretkeygen.vercel.app/)
 
 ---
 
@@ -68,7 +77,7 @@ bun add @elysiajs/cookie
 # 3. Backend: OAuth2 & Google Classroom Routes
 
 ## 3.1 Buat `src/auth.ts` — Google OAuth2 Helper
-
+**🌟FastTips create file**: di apps\backend run `code ./src/auth.ts`. file otomatis dibuat & dibuka. 
 ```ts
 import { google } from "googleapis";
 
@@ -215,14 +224,14 @@ const app = new Elysia()
   // --- AUTH ROUTES ---
 
   // Redirect mahasiswa ke halaman login Google
-  .get("/auth/login", ({ set }) => {
+  .get("/auth/login", ({ redirect }) => {
     const oauth2Client = createOAuthClient();
     const url = getAuthUrl(oauth2Client);
-    set.redirect = url;
+    return redirect(url);
   })
 
   // Google callback setelah login
-  .get("/auth/callback", async ({ query, set, cookie: { session } }) => {
+  .get("/auth/callback", async ({ query, set, cookie: { session }, redirect }) => {
     const { code } = query as { code: string };
 
     if (!code) {
@@ -239,18 +248,19 @@ const app = new Elysia()
       access_token: tokens.access_token!,
       refresh_token: tokens.refresh_token ?? undefined,
     });
+    if (!session) return;
 
     // Set cookie session
     session.value = sessionId;
     session.maxAge = 60 * 60 * 24; // 1 hari
 
     // Redirect ke frontend
-    set.redirect = "http://localhost:5173/classroom";
+    return redirect("http://localhost:5173/classroom");
   })
 
   // Cek status login
   .get("/auth/me", ({ cookie: { session } }) => {
-    const sessionId = session?.value;
+    const sessionId = session?.value as string;
     if (!sessionId || !tokenStore.has(sessionId)) {
       return { loggedIn: false };
     }
@@ -259,7 +269,9 @@ const app = new Elysia()
 
   // Logout
   .post("/auth/logout", ({ cookie: { session } }) => {
-    const sessionId = session?.value;
+    if(!session) return { success: false };
+
+    const sessionId = session?.value as string;
     if (sessionId) {
       tokenStore.delete(sessionId);
       session.remove();
@@ -271,7 +283,7 @@ const app = new Elysia()
 
   // Ambil daftar courses mahasiswa
   .get("/classroom/courses", async ({ cookie: { session }, set }) => {
-    const sessionId = session?.value;
+    const sessionId = session?.value as string;
     const tokens = sessionId ? tokenStore.get(sessionId) : null;
 
     if (!tokens) {
@@ -285,7 +297,7 @@ const app = new Elysia()
 
   // Ambil coursework + submisi untuk satu course
   .get("/classroom/courses/:courseId/submissions", async ({ params, cookie: { session }, set }) => {
-    const sessionId = session?.value;
+    const sessionId = session?.value as string;
     const tokens = sessionId ? tokenStore.get(sessionId) : null;
 
     if (!tokens) {
@@ -414,10 +426,10 @@ function formatDueDate(dueDate?: { year: number; month: number; day: number }) {
 
 function stateLabel(state?: string) {
   const map: Record<string, { label: string; variant: "default" | "secondary" | "destructive" | "outline" }> = {
-    TURNED_IN:  { label: "Dikumpulkan", variant: "default" },
-    RETURNED:   { label: "Dinilai", variant: "secondary" },
-    CREATED:    { label: "Belum Dikumpulkan", variant: "destructive" },
-    NEW:        { label: "Belum Dimulai", variant: "outline" },
+    TURNED_IN: { label: "Dikumpulkan", variant: "default" },
+    RETURNED: { label: "Dinilai", variant: "secondary" },
+    CREATED: { label: "Belum Dikumpulkan", variant: "destructive" },
+    NEW: { label: "Belum Dimulai", variant: "outline" },
     RECLAIMED_BY_STUDENT: { label: "Ditarik Kembali", variant: "outline" },
   }
   return map[state ?? ""] ?? { label: state ?? "–", variant: "outline" }
@@ -430,9 +442,9 @@ function stateLabel(state?: string) {
 function AttachmentLink({ att }: { att: SubmissionAttachmentItem }) {
   if (att.driveFile) {
     return (
-      <a href={att.driveFile.driveFile.alternateLink} target="_blank" rel="noopener noreferrer"
+      <a href={att.driveFile.alternateLink} target="_blank" rel="noopener noreferrer"
         className="flex items-center gap-1 text-blue-600 hover:underline text-sm">
-        📄 {att.driveFile.driveFile.title}
+        📄 {att.driveFile.title}
       </a>
     )
   }
@@ -471,91 +483,110 @@ function CourseWorkCard({ item }: { item: CourseWorkWithSubmission }) {
   const score = submission?.assignedGrade ?? submission?.draftGrade
 
   return (
-    <Card className="flex flex-col gap-0 h-full shadow-sm hover:shadow-md transition-shadow">
-      <CardHeader className="pb-2">
+    <Card className="flex flex-col h-full shadow-sm hover:shadow-md transition-shadow overflow-hidden">
+      <CardHeader className="pb-2 shrink-0">
         <div className="flex items-start justify-between gap-2">
-          <CardTitle className="text-base leading-snug">{courseWork.title}</CardTitle>
-          <Badge variant={variant} className="shrink-0">{label}</Badge>
+          <CardTitle className="text-base leading-snug wrap-break-word min-w-0">
+            {courseWork.title}
+          </CardTitle>
+          <Badge variant={variant} className="shrink-0 whitespace-nowrap">
+            {label}
+          </Badge>
         </div>
         <CardDescription className="text-xs mt-1">
           🗓 {formatDueDate(courseWork.dueDate)}
         </CardDescription>
       </CardHeader>
 
-      <Separator />
+      <Separator className="shrink-0" />
 
-      <CardContent className="flex flex-col gap-3 pt-3 flex-1">
+      {/*
+    ScrollArea membungkus seluruh body — card tidak akan
+    tumbuh melebihi tinggi container grid-nya.
+    Hapus ScrollArea kalau kamu tidak pakai fixed-height grid.
+  */}
+      <ScrollArea className="flex-1 min-h-0">
+        <CardContent className="flex flex-col gap-3 pt-3 pb-4">
 
-        {/* Deskripsi tugas */}
-        {courseWork.description && (
-          <div>
-            <p className="text-xs font-semibold text-muted-foreground mb-1">DESKRIPSI</p>
-            <ScrollArea className="max-h-24">
-              <p className="text-sm text-foreground whitespace-pre-wrap">{courseWork.description}</p>
-            </ScrollArea>
-          </div>
-        )}
-
-        {/* Lampiran soal */}
-        {courseWork.materials && courseWork.materials.length > 0 && (
-          <div>
-            <p className="text-xs font-semibold text-muted-foreground mb-1">LAMPIRAN TUGAS</p>
+          {/* Deskripsi tugas */}
+          {courseWork.description && (
             <div className="flex flex-col gap-1">
-              {courseWork.materials.map((mat, i) => {
-                const att: SubmissionAttachmentItem = {
-                  driveFile: mat.driveFile,
-                  link: mat.link,
-                  youtubeVideo: mat.youtubeVideo,
-                  form: mat.form
-                    ? { formUrl: mat.form.formUrl, title: mat.form.title, responseUrl: "" }
-                    : undefined,
-                }
-                return <AttachmentLink key={i} att={att} />
-              })}
+              <p className="text-xs font-semibold text-muted-foreground">DESKRIPSI</p>
+              {/* line-clamp-4: potong deskripsi panjang, tidak mendorong elemen lain */}
+              <p className="text-sm text-foreground whitespace-pre-wrap wrap-break-word line-clamp-4">
+                {courseWork.description}
+              </p>
             </div>
-          </div>
-        )}
+          )}
 
-        {/* Skor */}
-        {submission && (
-          <div className="flex items-center gap-2">
-            <p className="text-xs font-semibold text-muted-foreground">SKOR</p>
-            {score !== undefined ? (
-              <span className="text-sm font-bold text-primary">
-                {score} / {courseWork.maxPoints ?? "–"}
-              </span>
-            ) : (
-              <span className="text-sm text-muted-foreground">Belum dinilai</span>
-            )}
-          </div>
-        )}
-
-        {/* Lampiran submisi mahasiswa */}
-        {attachments.length > 0 && (
-          <div>
-            <p className="text-xs font-semibold text-muted-foreground mb-1">LAMPIRAN SUBMISI KAMU</p>
+          {/* Lampiran soal */}
+          {courseWork.materials && courseWork.materials.length > 0 && (
             <div className="flex flex-col gap-1">
-              {attachments.map((att, i) => (
-                <AttachmentLink key={i} att={att} />
-              ))}
+              <p className="text-xs font-semibold text-muted-foreground">LAMPIRAN TUGAS</p>
+              <div className="flex flex-col gap-1">
+                {courseWork.materials.map((mat, i) => {
+                  const att: SubmissionAttachmentItem = {
+                    driveFile: mat.driveFile?.driveFile,
+                    link: mat.link,
+                    youtubeVideo: mat.youtubeVideo,
+                    form: mat.form
+                      ? { formUrl: mat.form.formUrl, title: mat.form.title, responseUrl: "" }
+                      : undefined,
+                  }
+                  return <AttachmentLink key={i} att={att} />
+                })}
+              </div>
             </div>
-          </div>
-        )}
+          )}
 
-        {/* Short answer */}
-        {submission?.shortAnswerSubmission?.answer && (
-          <div>
-            <p className="text-xs font-semibold text-muted-foreground mb-1">JAWABAN SINGKATMU</p>
-            <p className="text-sm italic">"{submission.shortAnswerSubmission.answer}"</p>
-          </div>
-        )}
+          {/* Skor */}
+          {submission && (
+            <div className="flex items-center gap-2 shrink-0">
+              <p className="text-xs font-semibold text-muted-foreground shrink-0">SKOR</p>
+              {score !== undefined ? (
+                <span className="text-sm font-bold text-primary">
+                  {score} / {courseWork.maxPoints ?? "–"}
+                </span>
+              ) : (
+                <span className="text-sm text-muted-foreground">Belum dinilai</span>
+              )}
+            </div>
+          )}
 
-        {/* Late badge */}
-        {submission?.late && (
-          <Badge variant="destructive" className="w-fit text-xs">⚠ Terlambat</Badge>
-        )}
+          {/* Lampiran submisi mahasiswa */}
+          {attachments.length > 0 && (
+            <div className="flex flex-col gap-1">
+              <p className="text-xs font-semibold text-muted-foreground">LAMPIRAN SUBMISI KAMU</p>
+              <div className="flex flex-col gap-1">
+                {attachments.map((att, i) => (
+                  <AttachmentLink key={i} att={att} />
+                ))}
+              </div>
+            </div>
+          )}
 
-      </CardContent>
+          {/* Short answer */}
+          {submission?.shortAnswerSubmission?.answer && (
+            <div className="flex flex-col gap-1">
+              <p className="text-xs font-semibold text-muted-foreground">JAWABAN SINGKATMU</p>
+              {/* break-words: cegah teks panjang tanpa spasi meluber keluar card */}
+              <p className="text-sm italic wrap-break-word">
+                "{submission.shortAnswerSubmission.answer}"
+              </p>
+            </div>
+          )}
+
+          {/* Late badge — selalu paling bawah, diberi padding atas */}
+          {submission?.late && (
+            <div className="pt-1">
+              <Badge variant="destructive" className="w-fit text-xs">
+                ⚠ Terlambat
+              </Badge>
+            </div>
+          )}
+
+        </CardContent>
+      </ScrollArea>
     </Card>
   )
 }
@@ -808,9 +839,6 @@ Alur penggunaan mahasiswa:
 
 # Bug Handling
 
-### `401 Unauthorized` padahal sudah login
-Cookie tidak terkirim. Pastikan semua `fetch()` di frontend menggunakan `credentials: "include"`, dan CORS backend menggunakan `credentials: true`.
-
 ### `redirect_uri_mismatch` dari Google
 URI di Google Cloud Console **harus persis sama** dengan `GOOGLE_REDIRECT_URI` di `.env`. Cek trailing slash dan protokol (`http` vs `https`).
 
@@ -836,17 +864,8 @@ monorepo/
 │           ├── auth.ts             ← OAuth2 helper (NEW)
 │           ├── classroom.ts        ← Google Classroom fetcher (NEW)
 │           └── index.ts            ← Routes: /auth/* & /classroom/* (UPDATED)
-├── packages/
-│   └── shared/
-│       └── src/index.ts            ← + Classroom types (UPDATED)
-└── .env                            ← Google OAuth credentials
+│           └── .env                ← Database, Google Client & Redirect URI, Sessions (UPDATED)
+└── packages/
+    └── shared/
+        └── src/index.ts            ← + Classroom types (UPDATED)
 ```
-
----
-
-Lanjutan saran untuk **Phase 4** (production-ready):
-- Simpan token ke database (Prisma) agar tidak hilang saat server restart
-- Auto-refresh access token dengan refresh token
-- Tambahkan `react-router-dom` untuk routing yang proper
-- Implementasi **Eden Treaty** (Elysia typed client) agar frontend tidak perlu manual fetch
-- Deploy ke VPS / Railway dengan environment variable yang aman
