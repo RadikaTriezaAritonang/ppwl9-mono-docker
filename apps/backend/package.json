@@ -3,10 +3,15 @@
   "module": "src/index.ts",
   "private": true,
   "scripts": {
-  "build": "prisma generate",
-  "postinstall": "prisma generate",
-  "start": "bun src/index.ts"
-},
+    "build": "prisma generate && tsdown",
+    "start": "bun --env-file=.env --env-file=.env.production dist/index.mjs",
+    "postinstall": "prisma generate",
+    "prod:sql": "bunx prisma migrate diff --from-empty --to-schema prisma/schema.prisma --script > baseline.sql",
+    "prod:check-env": "bun --env-file=.env.production -e \"console.log(process.env.DATABASE_URL)\"",
+    "prod:migrate": "bun --env-file=.env.production prisma/migrate.ts",
+    "prod:seed": "bun --env-file=.env.production prisma/seed.ts",
+    "dev:turso" : "bun --env-file=.env.production src/index.ts"
+  },
   "dependencies": {
     "@elysiajs/cookie": "^0.8.0",
     "@elysiajs/cors": "^1.4.1",
