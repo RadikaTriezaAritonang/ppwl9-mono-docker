@@ -3,6 +3,7 @@
   "module": "src/index.ts",
   "private": true,
   "scripts": {
+    "dev": "bun run --watch src/index.ts",
     "build": "prisma generate && tsdown",
     "start": "bun --env-file=.env --env-file=.env.production dist/index.mjs",
     "postinstall": "prisma generate",
@@ -10,7 +11,7 @@
     "prod:check-env": "bun --env-file=.env.production -e \"console.log(process.env.DATABASE_URL)\"",
     "prod:migrate": "bun --env-file=.env.production prisma/migrate.ts",
     "prod:seed": "bun --env-file=.env.production prisma/seed.ts",
-    "dev:turso" : "bun --env-file=.env.production src/index.ts"
+    "dev:turso": "bun --env-file=.env.production src/index.ts"
   },
   "dependencies": {
     "@elysiajs/cookie": "^0.8.0",
